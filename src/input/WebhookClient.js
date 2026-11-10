@@ -13,9 +13,12 @@ export class WebhookClient {
     this.pusherKey = import.meta.env.VITE_PUSHER_KEY || "";
     this.pusherCluster = import.meta.env.VITE_PUSHER_CLUSTER || "ap1";
 
-    this.status = "disconnected"; // 'connected_pusher' | 'connected_local' | 'connecting' | 'disconnected'
+    this.status = "disconnected"; // 'connected_pusher' | 'connected_local' | 'connected_cloud_poll' | 'connecting' | 'disconnected'
     this.statusDetail = "Belum terhubung";
     this.sseSource = null;
+    this.pollIntervalId = null;
+    this.lastPollTimestamp = Date.now() - 120000;
+    this.seenEventIds = new Set();
     this.pusherInstance = null;
     this.pusherChannel = null;
     this.webhookLogs = [];
@@ -152,6 +155,10 @@ export class WebhookClient {
       this.sseSource.close();
       this.sseSource = null;
     }
+    if (this.pollIntervalId) {
+      clearInterval(this.pollIntervalId);
+      this.pollIntervalId = null;
+    }
     if (this.pusherInstance) {
       try {
         this.pusherInstance.disconnect();
@@ -174,43 +181,47 @@ export class WebhookClient {
     this.statusDetail = "Menghubungkan ke channel room...";
     this._emitStatus();
 
-    // 1. Always connect Local Dev SSE stream if available (/api/local-stream)
-    try {
-      const sseUrl = `/api/local-stream?room=${encodeURIComponent(
-        this.roomId
-      )}&secret=${encodeURIComponent(this.secret)}`;
-      const es = new EventSource(sseUrl);
-      this.sseSource = es;
+    // 1. Always start Built-in Cloud Relay Poller (GET /api/webhook) so Vercel works 100% Zero-Config without Pusher
+    this._startCloudRelayPoller();
 
-      es.onmessage = (evt) => {
-        try {
-          const msg = JSON.parse(evt.data);
-          if (msg.type === "connected") {
-            if (this.status !== "connected_pusher") {
-              this.status = "connected_local";
-              this.statusDetail = `Aktif • Relay Lokal (${this.roomId})`;
-              this._emitStatus();
+    // 2. Connect Local Dev SSE stream if running on localhost (/api/local-stream)
+    const isLocalhost =
+      window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    if (isLocalhost) {
+      try {
+        const sseUrl = `/api/local-stream?room=${encodeURIComponent(
+          this.roomId
+        )}&secret=${encodeURIComponent(this.secret)}`;
+        const es = new EventSource(sseUrl);
+        this.sseSource = es;
+
+        es.onmessage = (evt) => {
+          try {
+            const msg = JSON.parse(evt.data);
+            if (msg.type === "connected") {
+              if (this.status !== "connected_pusher") {
+                this.status = "connected_local";
+                this.statusDetail = `Aktif • Relay Lokal (${this.roomId})`;
+                this._emitStatus();
+              }
+            } else if (msg.type === "donation-received" && msg.payload) {
+              this._handleIncomingWebhookPayload(msg.payload);
             }
-          } else if (msg.type === "donation-received" && msg.payload) {
-            this._handleIncomingWebhookPayload(msg.payload);
+          } catch {
+            // ignore malformed message
           }
-        } catch {
-          // ignore malformed message
-        }
-      };
+        };
 
-      es.onerror = () => {
-        if (this.status === "connected_local") {
-          this.status = "disconnected";
-          this.statusDetail = "Relay lokal tidak aktif";
-          this._emitStatus();
-        }
-      };
-    } catch {
-      // ignore SSE error
+        es.onerror = () => {
+          es.close();
+          this.sseSource = null;
+        };
+      } catch {
+        // ignore SSE error
+      }
     }
 
-    // 2. If Pusher Key is configured, also connect Pusher Private Channel
+    // 3. If Pusher Key is configured, also connect Pusher Private Channel
     if (this.pusherKey && this.pusherKey.trim().length > 4) {
       try {
         const PusherClass = await this._loadPusherScript();
@@ -237,9 +248,8 @@ export class WebhookClient {
           });
 
           this.pusherChannel.bind("pusher:subscription_error", () => {
-            if (this.status !== "connected_local") {
-              this.status = "disconnected";
-              this.statusDetail = "Gagal otorisasi Pusher Private Channel";
+            if (this.status === "connecting") {
+              this.status = "connected_cloud_poll";
               this._emitStatus();
             }
           });
@@ -255,16 +265,75 @@ export class WebhookClient {
     }
   }
 
+  _startCloudRelayPoller() {
+    if (this.pollIntervalId) {
+      clearInterval(this.pollIntervalId);
+    }
+
+    const pollOnce = async () => {
+      if (!this.roomId || !this.secret) return;
+      try {
+        const params = new URLSearchParams({
+          room: this.roomId,
+          secret: this.secret,
+          since: String(this.lastPollTimestamp),
+        });
+        const res = await fetch(`/api/webhook?${params.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (this.status !== "connected_pusher" && this.status !== "connected_local") {
+          this.status = "connected_cloud_poll";
+          this.statusDetail = `Aktif • Cloud Relay (${this.roomId})`;
+          this._emitStatus();
+        }
+
+        if (Array.isArray(data.events) && data.events.length > 0) {
+          for (const evt of data.events) {
+            if (evt.timestamp && evt.timestamp > this.lastPollTimestamp) {
+              this.lastPollTimestamp = evt.timestamp;
+            }
+            this._handleIncomingWebhookPayload(evt);
+          }
+        }
+      } catch {
+        // ignore transient network error
+      }
+    };
+
+    pollOnce();
+    this.pollIntervalId = setInterval(pollOnce, 1400);
+  }
+
   _handleIncomingWebhookPayload(payload) {
     if (!payload) return;
+    const evtId = payload.eventId || `${payload.donatorName}_${payload.timestamp}`;
+    if (this.seenEventIds.has(evtId)) {
+      return;
+    }
+    this.seenEventIds.add(evtId);
+    if (this.seenEventIds.size > 200) {
+      const firstKey = this.seenEventIds.values().next().value;
+      this.seenEventIds.delete(firstKey);
+    }
+
+    if (payload.timestamp && payload.timestamp > this.lastPollTimestamp) {
+      this.lastPollTimestamp = payload.timestamp;
+    }
+
     this.webhookLogs.unshift({
-      time: new Date().toLocaleTimeString("id-ID"),
+      time: new Date(payload.timestamp || Date.now()).toLocaleTimeString("id-ID"),
       provider: payload.provider || this.provider,
       donatorName: payload.donatorName,
       amount: payload.amount,
       rawMessage: payload.rawMessage,
       signatureVerified: Boolean(payload.signatureVerified),
       signatureMethod: payload.signatureMethod || "",
+      rawPayload: payload.rawPayload || null,
+      receivedHeaders: payload.receivedHeaders || null,
     });
     if (this.webhookLogs.length > 20) this.webhookLogs.pop();
     this._emitStatus();

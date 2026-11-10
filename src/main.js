@@ -870,6 +870,9 @@ class StreamKartApp {
       } else if (whState.status === "connected_local") {
         badge.textContent = "🟢 Relay Lokal Aktif";
         badge.style.color = "#4ade80";
+      } else if (whState.status === "connected_cloud_poll") {
+        badge.textContent = "🟢 Cloud Relay Aktif";
+        badge.style.color = "#4ade80";
       } else if (whState.status === "connecting") {
         badge.textContent = "🟡 Menghubungkan...";
         badge.style.color = "#facc15";
@@ -897,7 +900,7 @@ class StreamKartApp {
           .map(
             (l) => `
             <div class="history-item">
-              <div>
+              <div style="width:100%">
                 <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
                   <span style="color:#94a3b8">${l.time}</span>
                   <span class="lb-badge" style="background:#0284c7">${l.provider.toUpperCase()}</span>
@@ -910,6 +913,18 @@ class StreamKartApp {
                   <span style="color:#4ade80">Rp ${Number(l.amount).toLocaleString("id-ID")}</span>
                 </div>
                 <div style="font-size:10px;color:#cbd5e1;margin-top:2px">${l.rawMessage || "-"}</div>
+                ${
+                  l.rawPayload
+                    ? `<details style="margin-top:4px;font-size:10px;color:#94a3b8">
+                        <summary style="cursor:pointer;color:#38bdf8">🔍 Lihat Raw Data & Header yang Diterima</summary>
+                        <pre style="margin-top:4px;padding:6px;background:rgba(0,0,0,0.45);border-radius:6px;overflow-x:auto;color:#e2e8f0;font-size:9.5px">${JSON.stringify(
+                          { headers: l.receivedHeaders, body: l.rawPayload },
+                          null,
+                          2
+                        )}</pre>
+                      </details>`
+                    : ""
+                }
               </div>
             </div>
           `

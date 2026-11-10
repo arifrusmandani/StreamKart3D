@@ -55,7 +55,10 @@ export function verifyTakoHmacSignature(
     return false;
   }
 
-  const headerSig = String(takoSignatureFromHeader).trim();
+  // Strip optional "sha256=" prefix if sent by a provider
+  const headerSig = String(takoSignatureFromHeader)
+    .trim()
+    .replace(/^sha256=/i, "");
   const headerBuf = Buffer.from(headerSig);
 
   // 1. Exact Tako specification: crypto.createHmac("sha256", webhookToken).update(JSON.stringify(webhookBody)).digest("hex")
@@ -123,13 +126,23 @@ export function verifyWebhookSignature({
         return {
           valid: true,
           verified: true,
+          receivedSignature: takoSig,
           method: "X-Tako-Signature (HMAC-SHA256)",
         };
       }
     }
+    if (!requireSignature) {
+      return {
+        valid: true,
+        verified: false,
+        receivedSignature: takoSig,
+        method: "URL Room Secret (X-Tako-Signature diterima, urutan JSON berbeda)",
+      };
+    }
     return {
       valid: false,
       verified: false,
+      receivedSignature: takoSig,
       reason: "Header X-Tako-Signature tidak cocok dengan Webhook Token (HMAC SHA-256 mismatch).",
     };
   }
@@ -142,15 +155,25 @@ export function verifyWebhookSignature({
         return {
           valid: true,
           verified: true,
+          receivedSignature: otherHmacSig,
           method: saweriaSig
             ? "Saweria-Callback-Signature (HMAC-SHA256)"
             : "X-Webhook-Signature (HMAC-SHA256)",
         };
       }
     }
+    if (!requireSignature) {
+      return {
+        valid: true,
+        verified: false,
+        receivedSignature: otherHmacSig,
+        method: "URL Room Secret (Header Signature diterima)",
+      };
+    }
     return {
       valid: false,
       verified: false,
+      receivedSignature: otherHmacSig,
       reason: "Signature HMAC SHA-256 pada header tidak cocok dengan Webhook Token.",
     };
   }
@@ -164,9 +187,18 @@ export function verifyWebhookSignature({
         return {
           valid: true,
           verified: true,
+          receivedSignature: headerToken,
           method: "Header Token Match",
         };
       }
+    }
+    if (!requireSignature) {
+      return {
+        valid: true,
+        verified: false,
+        receivedSignature: headerToken,
+        method: "URL Room Secret",
+      };
     }
     return {
       valid: false,
@@ -188,6 +220,7 @@ export function verifyWebhookSignature({
   return {
     valid: true,
     verified: false,
+    receivedSignature: null,
     method: "URL Room Secret (Tanpa Header Signature)",
   };
 }
@@ -195,14 +228,21 @@ export function verifyWebhookSignature({
 /**
  * Normalizes webhook payloads from Indonesian donation platforms:
  * - Saweria (amount_raw, donator_name, message, id)
- * - Tako (amount, supporter_name / name, message, id)
+ * - Tako (amount / price / nominal, supporter_name / gifter_name / name / supporter, message, id)
  * - Bagi-Bagi (amount / nominal, supporter_name / donator_name, message, transaction_id)
  * - Sociabuzz (amount_settled / price, supporter, message, id)
  * - Generic JSON
  */
 export function normalizeProviderPayload(provider = "generic", body = {}) {
   const b = body && typeof body === "object" ? body : {};
-  const dataObj = b.data && typeof b.data === "object" ? b.data : b;
+  const dataObj =
+    b.data && typeof b.data === "object"
+      ? b.data
+      : b.gift && typeof b.gift === "object"
+      ? b.gift
+      : b.result && typeof b.result === "object"
+      ? b.result
+      : b;
   const prov = String(provider || "generic").toLowerCase();
 
   let providerEventId =
@@ -212,14 +252,28 @@ export function normalizeProviderPayload(provider = "generic", body = {}) {
     b.id ||
     `wh_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
+  const nestedUser =
+    (typeof dataObj.supporter === "object" && dataObj.supporter) ||
+    (typeof dataObj.donator === "object" && dataObj.donator) ||
+    (typeof dataObj.user === "object" && dataObj.user) ||
+    (typeof dataObj.sender === "object" && dataObj.sender) ||
+    null;
+
   let donatorName =
     dataObj.donator_name ||
     dataObj.supporter_name ||
-    dataObj.supporter ||
+    dataObj.gifter_name ||
+    (typeof dataObj.supporter === "string" ? dataObj.supporter : null) ||
     dataObj.sender_name ||
+    dataObj.username ||
+    nestedUser?.name ||
+    nestedUser?.username ||
     dataObj.name ||
-    dataObj.sender ||
-    "Anonim";
+    (typeof dataObj.sender === "string" ? dataObj.sender : null) ||
+    b.supporter_name ||
+    b.donator_name ||
+    b.name ||
+    "Sultan_Tako";
 
   let rawAmount =
     dataObj.amount_raw ??
@@ -228,6 +282,12 @@ export function normalizeProviderPayload(provider = "generic", body = {}) {
     dataObj.nominal ??
     dataObj.price ??
     dataObj.total ??
+    dataObj.value ??
+    dataObj.gift?.amount ??
+    dataObj.gift?.price ??
+    b.amount ??
+    b.nominal ??
+    b.price ??
     0;
 
   if (typeof rawAmount === "string") {
@@ -236,15 +296,24 @@ export function normalizeProviderPayload(provider = "generic", body = {}) {
     rawAmount = Number(rawAmount) || 0;
   }
 
+  // If a dashboard "Tes Notifikasi" sends 0 or no amount, default to 10000 so the test triggers a visible skill
+  if (rawAmount <= 0) {
+    rawAmount = 10000;
+  }
+
   let rawMessage =
     dataObj.message ??
     dataObj.support_message ??
     dataObj.comment ??
     dataObj.note ??
+    dataObj.text ??
+    dataObj.caption ??
+    dataObj.gift?.message ??
+    b.message ??
     "";
 
   rawMessage = String(rawMessage || "").trim().slice(0, 250);
-  donatorName = String(donatorName || "Anonim").trim().slice(0, 40) || "Anonim";
+  donatorName = String(donatorName || "Sultan_Tako").trim().slice(0, 40) || "Sultan_Tako";
 
   // Parse #<number> and !<skillKeyword>
   const targetMatch = rawMessage.match(/#(\d{1,2})/);
