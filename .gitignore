@@ -1,0 +1,21 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables (keep .env.example)
+.env
+.env.*
+!.env.example
+
+# Vercel & Logs
+.vercel/
+*.log
+npm-debug.log*
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

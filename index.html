@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>StreamKart 3D — Interactive Donation Racing Game</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Russo+One&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app-shell">
+      <!-- MAIN 3D VIEWPORT AREA -->
+      <main id="viewport-area">
+        <canvas id="race-canvas"></canvas>
+        <canvas id="speedlines-canvas"></canvas>
+        <div id="screen-flash"></div>
+        <div id="kart-labels-layer"></div>
+
+        <!-- TOP BROADCAST HUD BAR -->
+        <header id="hud-top">
+          <!-- LEFT STACK: LAP/PACE + CAMERA BAR + COLLAPSIBLE LEADERBOARD -->
+          <div id="hud-left-stack">
+            <div class="hud-left-group">
+              <div class="hud-pill lap-pill">
+                <span class="pill-label">LAP</span>
+                <span id="hud-lap-value" class="pill-value">1 / 6</span>
+              </div>
+              <div class="hud-pill pacing-pill" title="Adaptive Pacing Multiplier">
+                <span class="pill-label">PACE</span>
+                <span id="hud-pace-value" class="pill-value">1.00x</span>
+              </div>
+              <div id="hud-camera-bar" class="camera-bar" role="group" aria-label="Camera Mode">
+                <button class="cam-btn active" data-cam="AUTO" title="Broadcast Director Otomatis">
+                  🎥 AUTO
+                </button>
+                <button class="cam-btn" data-cam="CHASE" title="Chase Cam">CHASE</button>
+                <button class="cam-btn" data-cam="DRONE" title="Drone Orbit">DRONE</button>
+                <button class="cam-btn" data-cam="TRACKSIDE" title="Trackside">CORNER</button>
+                <button class="cam-btn" data-cam="ONBOARD" title="Cockpit POV">POV</button>
+                <button class="cam-btn" data-cam="PODIUM" title="Sorot Panggung Podium 3D">
+                  🏆 PODIUM
+                </button>
+              </div>
+            </div>
+
+            <!-- LEFT LIVE LEADERBOARD & VOTING PROGRESS (COLLAPSIBLE) -->
+            <aside id="hud-leaderboard">
+              <div class="leaderboard-header">
+                <span>🏆 KLASEMEN LIVE</span>
+                <div class="leaderboard-header-right">
+                  <span id="hud-total-pot" class="pot-badge">Rp 0</span>
+                  <button
+                    id="btn-collapse-leaderboard"
+                    class="hud-collapse-btn"
+                    title="Sembunyikan / Tampilkan Klasemen"
+                  >
+                    ▾
+                  </button>
+                </div>
+              </div>
+              <div id="leaderboard-body">
+                <div id="leaderboard-rows" class="leaderboard-list"></div>
+                <div class="leaderboard-hint">Klik peserta untuk kunci kamera</div>
+              </div>
+            </aside>
+          </div>
+
+          <!-- CENTER VOTING TIMER -->
+          <div id="hud-timer-box" class="timer-box">
+            <div class="timer-status-row">
+              <span id="hud-race-state" class="state-badge">SIAP DI GARIS START</span>
+            </div>
+            <div class="timer-main-row">
+              <span class="timer-icon">⏱</span>
+              <span id="hud-timer-value" class="timer-digits">03:00</span>
+              <div class="timer-extend-btns">
+                <button id="btn-add-1m" class="extend-btn" title="Tambah Waktu Voting +1 Menit">
+                  +1m
+                </button>
+                <button id="btn-add-5m" class="extend-btn" title="Tambah Waktu Voting +5 Menit">
+                  +5m
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- RIGHT HUD UTILITY BUTTONS (COMPACT & COLLAPSIBLE) -->
+          <div class="hud-right-group">
+            <div id="hud-tools-drawer" class="hud-tools-drawer">
+              <button id="btn-auto-sim" class="util-btn sim-btn" title="Simulasi Donasi Otomatis">
+                🤖 Sim: OFF
+              </button>
+              <button id="btn-audio-toggle" class="util-btn" title="Mute / Unmute Suara">
+                🔊 Audio
+              </button>
+              <select id="select-weather" class="util-select" title="Siklus Waktu & Cuaca Arena">
+                <option value="auto" selected>🌦️ Cuaca: Auto</option>
+                <option value="clear_day">☀️ Siang</option>
+                <option value="sunset_dusk">🌅 Senja</option>
+                <option value="neon_night">🌙 Malam</option>
+                <option value="rain_storm">⛈️ Hujan</option>
+              </select>
+              <select id="select-quality" class="util-select" title="Preset Kualitas Visual">
+                <option value="high">✨ High FX</option>
+                <option value="medium">⚡ Med FX</option>
+                <option value="low">🪶 Low FX</option>
+              </select>
+              <button id="btn-popout-admin" class="util-btn" title="Buka Panel Admin di Window Terpisah">
+                ⧉ Pop-out
+              </button>
+            </div>
+            <button
+              id="btn-collapse-tools"
+              class="util-btn"
+              title="Sembunyikan / Tampilkan Toolbar Cepat"
+            >
+              🛠️ Tools ▸
+            </button>
+            <button id="btn-toggle-sidebar" class="util-btn primary-util" title="Buka/Tutup Panel Kontrol (Tab)">
+              ⚙️ Panel [Tab]
+            </button>
+          </div>
+        </header>
+
+        <!-- SKILL TELEGRAPH CALLOUT BANNER -->
+        <div id="telegraph-container" aria-live="polite"></div>
+
+        <!-- CHECKPOINT / LAST CALL / CHAOS BANNER -->
+        <div id="announcement-banner" class="hidden"></div>
+
+        <!-- 3-2-1-GO COUNTDOWN OVERLAY -->
+        <div id="countdown-overlay" class="hidden">
+          <div id="countdown-text">3</div>
+        </div>
+
+        <!-- BOTTOM-LEFT MINIMAP & HYPE METER -->
+        <div id="hud-bottom-left">
+          <div class="minimap-card">
+            <canvas id="minimap-canvas" width="168" height="168"></canvas>
+            <div class="minimap-label" id="minimap-track-name">Grand Arcade Circuit</div>
+          </div>
+
+          <div class="hype-card">
+            <div class="hype-top">
+              <span class="hype-title">🔥 HYPE METER (60s)</span>
+              <span id="hype-percent" class="hype-pct">0%</span>
+            </div>
+            <div class="hype-bar-bg">
+              <div id="hype-bar-fill" class="hype-bar-fill" style="width: 0%"></div>
+            </div>
+            <div class="hype-sub" id="hype-status-text">
+              Penuhkan bar untuk memicu CHAOS MODE!
+            </div>
+          </div>
+        </div>
+
+        <!-- CRASH RECOVERY PROMPT BANNER -->
+        <div id="recovery-modal" class="recovery-banner hidden">
+          <div>
+            <strong>⚡ Sesi Balapan Sebelumnya Ditemukan!</strong>
+            <span id="recovery-desc">Ingin melanjutkan balapan dari posisi terakhir?</span>
+          </div>
+          <div class="recovery-actions">
+            <button id="btn-recover-yes" class="action-btn start-btn">Lanjutkan</button>
+            <button id="btn-recover-no" class="action-btn reset-btn">Abaikan</button>
+          </div>
+        </div>
+
+        <!-- MODE B: DONATOR BATTLE ROYALE REGISTRATION OVERLAY -->
+        <div id="registration-overlay" class="registration-overlay hidden">
+          <div class="reg-card">
+            <div class="reg-top-row">
+              <div>
+                <span class="results-badge">👑 MODE B: DONATOR BATTLE ROYALE</span>
+                <h2 class="reg-title">📢 PENDAFTARAN PEMBALAP DIBUKA!</h2>
+              </div>
+              <div class="reg-timer-pill">
+                <span>⏱</span>
+                <span id="reg-timer-digits">01:00</span>
+                <button id="btn-reg-add30s" class="extend-btn" title="Tambah Waktu Pendaftaran +30 Detik">
+                  +30s
+                </button>
+              </div>
+            </div>
+
+            <div class="reg-rule-banner" id="reg-rule-banner">
+              Donasi minimal <strong>Rp 10.000</strong> untuk mendaftarkan nama Anda sebagai mobil!
+              Donasi lebih besar mendapat <strong>Starting Buff (Boost / Shield / Nitro)</strong> di garis start!
+              Ketik <code>!f1</code>, <code>!supercar</code>, <code>!buggy</code>, atau <code>!kart</code> di pesan untuk memilih bodi mobil.
+            </div>
+
+            <div class="reg-slots-header">
+              <span id="reg-slots-counter">SLOT TERISI: 0 / 12 PEMBALAP</span>
+              <span class="reg-hint">Gunakan Input Manual atau aktifkan 🤖 Simulasi untuk mendaftarkan donatur</span>
+            </div>
+
+            <div id="reg-slots-grid" class="reg-slots-grid"></div>
+
+            <div class="reg-footer">
+              <button id="btn-reg-clear" class="action-btn reset-btn">
+                🧹 Reset Peserta
+              </button>
+              <button id="btn-reg-start-now" class="action-btn start-btn">
+                🏁 Tutup Pendaftaran & Mulai Balap Sekarang!
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- PODIUM & FINAL RESULTS OVERLAY -->
+        <div id="results-modal" class="results-overlay hidden">
+          <div class="results-card">
+            <div class="results-badge" id="results-reason-badge">BALAPAN SELESAI</div>
+            <h1 class="results-title">🏆 PEMENANG VOTING 🏆</h1>
+            <div id="results-winner-box" class="winner-showcase"></div>
+
+            <div class="results-grid">
+              <div class="results-standings-col">
+                <h3>📊 Hasil Akhir Klasemen & Donasi</h3>
+                <div id="results-standings-list" class="results-list"></div>
+              </div>
+              <div class="results-mvp-col">
+                <h3>👑 SULTAN MVP DONATUR</h3>
+                <div id="results-mvp-box" class="mvp-box"></div>
+              </div>
+            </div>
+
+            <div class="results-footer">
+              <button id="btn-results-toggle-podium" class="action-btn pause-btn">
+                🎥 Lihat Panggung Podium 3D
+              </button>
+              <button id="btn-results-confetti" class="action-btn confetti-btn">
+                🎉 Rayakan Lagi
+              </button>
+              <button id="btn-results-newrace" class="action-btn start-btn">
+                🔄 Balapan Baru / Kembali ke Lobby
+              </button>
+            </div>
+          </div>
+          <!-- FLOATING BAR WHEN VIEWING 3D PODIUM FULLSCREEN -->
+          <div id="podium-floating-bar" class="podium-floating-bar hidden">
+            <span id="podium-bar-winner-text">🏆 JUARA #1: ELDEN RING DLC</span>
+            <button id="btn-podium-show-card" class="action-btn pause-btn">
+              📊 Tampilkan Tabel Hasil
+            </button>
+            <button id="btn-podium-confetti" class="action-btn confetti-btn">
+              🎉 Confetti
+            </button>
+            <button id="btn-podium-newrace" class="action-btn start-btn">
+              🔄 Balapan Baru
+            </button>
+          </div>
+        </div>
+      </main>
+
+      <!-- COLLAPSIBLE ADMIN CONTROL SIDEBAR -->
+      <aside id="admin-sidebar">
+        <div class="sidebar-top-bar">
+          <div class="brand-title">
+            <span class="brand-dot"></span>
+            <span>PANEL KONTROL STREAMER</span>
+          </div>
+          <div class="sidebar-top-actions">
+            <button id="btn-sidebar-popout" class="icon-btn" title="Pop-out ke Window Terpisah">
+              ⧉
+            </button>
+            <button id="btn-sidebar-close" class="icon-btn" title="Sembunyikan Sidebar (Tab)">
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <!-- RACE MASTER TRANSPORT CONTROLS -->
+        <div class="transport-bar">
+          <button id="btn-race-start" class="action-btn start-btn">▶ MULAI BALAP</button>
+          <button id="btn-race-pause" class="action-btn pause-btn" disabled>⏸ PAUSE</button>
+          <button id="btn-race-reset" class="action-btn reset-btn">🔄 RESET</button>
+        </div>
+
+        <!-- SIDEBAR NAVIGATION TABS -->
+        <nav class="sidebar-tabs">
+          <button class="tab-btn active" data-tab="tab-manual">⚡ Manual</button>
+          <button class="tab-btn" data-tab="tab-setup">🏁 Setup</button>
+          <button class="tab-btn" data-tab="tab-tiers">💎 13 Skill</button>
+          <button class="tab-btn" data-tab="tab-webhook">🔗 Webhook</button>
+        </nav>
+
+        <!-- TAB 1: MANUAL DONATION INPUT (MVP PRIORITY) -->
+        <section id="tab-manual" class="tab-panel active">
+          <div class="panel-card">
+            <div class="card-header-row">
+              <h3>⚡ Input Donasi Manual</h3>
+              <span class="shortcut-pill" title="1-9: Pilih Mobil | Q/W/E/R: Nominal | Enter: Kirim | Ctrl+Z: Undo">
+                ⌨️ Shortcut Aktif
+              </span>
+            </div>
+
+            <div class="form-row-2col">
+              <div class="form-group">
+                <label for="input-donator-name">Nama Donatur</label>
+                <input
+                  id="input-donator-name"
+                  type="text"
+                  placeholder="Contoh: Budi_99"
+                  value="Sultan_Budi"
+                />
+              </div>
+              <div class="form-group">
+                <label for="input-donation-amount">Nominal (Rp)</label>
+                <input
+                  id="input-donation-amount"
+                  type="number"
+                  step="1000"
+                  min="1000"
+                  value="25000"
+                />
+              </div>
+            </div>
+
+            <!-- NOMINAL PRESET BUTTONS -->
+            <div class="nominal-presets">
+              <button type="button" class="nom-btn" data-amount="5000">5k (Q)</button>
+              <button type="button" class="nom-btn" data-amount="10000">10k (W)</button>
+              <button type="button" class="nom-btn" data-amount="15000">15k</button>
+              <button type="button" class="nom-btn active" data-amount="25000">25k (E)</button>
+              <button type="button" class="nom-btn" data-amount="50000">50k (R)</button>
+              <button type="button" class="nom-btn" data-amount="75000">75k</button>
+              <button type="button" class="nom-btn" data-amount="100000">100k</button>
+              <button type="button" class="nom-btn" data-amount="150000">150k</button>
+              <button type="button" class="nom-btn" data-amount="200000">200k</button>
+              <button type="button" class="nom-btn" data-amount="500000">500k</button>
+            </div>
+
+            <!-- TARGET KART SELECTOR -->
+            <div class="form-group">
+              <label>Pilih Target Mobil Peserta (Shortcut Angka 1–9)</label>
+              <div id="manual-target-buttons" class="target-grid"></div>
+            </div>
+
+            <!-- SKILL OVERRIDE OR AUTO FROM TIER -->
+            <div class="form-row-2col">
+              <div class="form-group">
+                <label for="select-manual-skill">Skill yang Dipicu</label>
+                <select id="select-manual-skill"></select>
+              </div>
+              <div class="form-group">
+                <label>Pratinjau Skill</label>
+                <div id="skill-preview-badge" class="skill-preview-box">🚀 Nitro NOS</div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="input-donation-msg">Pesan Donasi (Opsional)</label>
+              <input
+                id="input-donation-msg"
+                type="text"
+                placeholder="Gas pol jangan kasih kendor!"
+              />
+            </div>
+
+            <button id="btn-submit-donation" class="submit-donation-btn">
+              ⚡ KIRIM DONASI SEKARANG (Enter)
+            </button>
+          </div>
+
+          <!-- QUICK 1-CLICK SKILL MATRIX -->
+          <div class="panel-card">
+            <h3>🎮 Trigger Skill Instan (1-Klik ke Mobil Terpilih)</h3>
+            <div id="quick-skill-grid" class="quick-skill-grid"></div>
+          </div>
+
+          <!-- PASTE NOTIFICATION PARSER -->
+          <div class="panel-card">
+            <h3>📋 Paste Teks Notifikasi Donasi</h3>
+            <div class="paste-row">
+              <input
+                id="input-paste-raw"
+                type="text"
+                placeholder="Contoh: Budi donasi Rp50.000: #2 !misil sikat!"
+              />
+              <button id="btn-parse-send" class="mini-action-btn">Kirim</button>
+            </div>
+          </div>
+
+          <!-- UNASSIGNED DONATIONS QUEUE -->
+          <div id="unassigned-card" class="panel-card unassigned-box hidden">
+            <h3>⚠️ Donasi Tanpa Nomor Mobil (Klik untuk Arahkan)</h3>
+            <div id="unassigned-list" class="history-list"></div>
+          </div>
+
+          <!-- DONATION HISTORY & UNDO -->
+          <div class="panel-card">
+            <div class="card-header-row">
+              <h3>🕒 Riwayat Input & Undo</h3>
+              <button id="btn-undo-last" class="mini-action-btn" title="Batalkan Donasi Terakhir (Ctrl+Z)">
+                ↶ Undo Terakhir
+              </button>
+            </div>
+            <div id="donation-history-list" class="history-list"></div>
+          </div>
+        </section>
+
+        <!-- TAB 2: RACE & VOTING DURATION SETUP -->
+        <section id="tab-setup" class="tab-panel">
+          <div class="panel-card">
+            <h3>🎮 Pilih Mode Permainan</h3>
+            <div class="form-group">
+              <label for="select-game-mode">Mode Balapan</label>
+              <select id="select-game-mode">
+                <option value="voting" selected>
+                  🗳️ Mode A: Option Voting Race (Keputusan Audiens)
+                </option>
+                <option value="battle_royale">
+                  👑 Mode B: Donator Battle Royale (Adu Gengsi Donatur)
+                </option>
+              </select>
+            </div>
+
+            <!-- MODE B SPECIFIC CONFIG -->
+            <div id="battle-royale-config-box" class="br-config-box hidden">
+              <div class="form-group">
+                <label for="input-br-max-slots">
+                  Jumlah / Kuota Peserta Battle Royale (2 – 24 Mobil, Ideal: 8–16)
+                </label>
+                <div class="duration-input-row">
+                  <input
+                    id="input-br-max-slots"
+                    type="range"
+                    min="2"
+                    max="24"
+                    value="12"
+                  />
+                  <input
+                    id="input-br-max-slots-num"
+                    type="number"
+                    min="2"
+                    max="24"
+                    value="12"
+                    class="num-small"
+                  />
+                  <span>Mobil</span>
+                </div>
+              </div>
+
+              <div class="duration-presets">
+                <button type="button" class="dur-btn br-slot-btn" data-slots="6">6 Mobil</button>
+                <button type="button" class="dur-btn br-slot-btn" data-slots="8">8 (Ideal)</button>
+                <button type="button" class="dur-btn br-slot-btn active" data-slots="12">12 (Standar)</button>
+                <button type="button" class="dur-btn br-slot-btn" data-slots="16">16 (Ramai)</button>
+                <button type="button" class="dur-btn br-slot-btn" data-slots="20">20 Mobil</button>
+                <button type="button" class="dur-btn br-slot-btn" data-slots="24">24 (Max Aman)</button>
+              </div>
+
+              <div class="form-row-2col">
+                <div class="form-group">
+                  <label for="input-br-min-rp">Min. Donasi Daftar (Rp)</label>
+                  <input
+                    id="input-br-min-rp"
+                    type="number"
+                    step="5000"
+                    min="1000"
+                    value="10000"
+                  />
+                </div>
+                <div class="form-group">
+                  <label for="input-br-reg-sec">Waktu Pendaftaran (Detik)</label>
+                  <input
+                    id="input-br-reg-sec"
+                    type="number"
+                    step="15"
+                    min="15"
+                    max="600"
+                    value="60"
+                  />
+                </div>
+              </div>
+
+              <div class="form-row-2col">
+                <button
+                  id="btn-br-fill-slots"
+                  type="button"
+                  class="mini-action-btn"
+                  style="padding: 8px; text-align: center"
+                  title="Langsung atur jumlah mobil di lintasan sesuai angka di atas"
+                >
+                  👥 Set Jumlah Mobil Manual
+                </button>
+                <button
+                  id="btn-open-registration"
+                  type="button"
+                  class="submit-donation-btn"
+                  style="padding: 8px; font-size: 11px"
+                >
+                  📢 BUKA PENDAFTARAN LIVE
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel-card">
+            <h3>⏱ Waktu Voting & Adaptive Lap System</h3>
+            <div class="form-group">
+              <label for="input-voting-minutes">
+                Durasi Voting (1 – 60 Menit)
+              </label>
+              <div class="duration-input-row">
+                <input
+                  id="input-voting-minutes"
+                  type="range"
+                  min="1"
+                  max="60"
+                  value="3"
+                />
+                <input
+                  id="input-voting-minutes-num"
+                  type="number"
+                  min="1"
+                  max="60"
+                  value="3"
+                  class="num-small"
+                />
+                <span>Menit</span>
+              </div>
+            </div>
+
+            <div class="duration-presets">
+              <button type="button" class="dur-btn" data-mins="1">1m</button>
+              <button type="button" class="dur-btn active" data-mins="3">3m</button>
+              <button type="button" class="dur-btn" data-mins="5">5m</button>
+              <button type="button" class="dur-btn" data-mins="10">10m</button>
+              <button type="button" class="dur-btn" data-mins="15">15m</button>
+              <button type="button" class="dur-btn" data-mins="30">30m</button>
+              <button type="button" class="dur-btn" data-mins="60">60m</button>
+            </div>
+
+            <div id="adaptive-lap-preview" class="plan-preview-banner">
+              Durasi 3 menit → Sprint Oval-X, 6 Lap (~30 dtk/lap)
+            </div>
+
+            <div class="form-row-2col">
+              <div class="form-group">
+                <label for="select-track-preset">Pilih Lintasan</label>
+                <select id="select-track-preset">
+                  <option value="auto">✨ Otomatis Sesuai Durasi</option>
+                  <option value="sprint">Sprint Oval-X (~30s/lap)</option>
+                  <option value="circuit">Grand Arcade Circuit (~60s/lap)</option>
+                  <option value="grandprix">Hyperion Grand Prix (~90s/lap)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="select-track-theme">Tema Visual Arena</label>
+                <select id="select-track-theme">
+                  <option value="neon_city">🌃 Kota Malam Neon</option>
+                  <option value="sunny_beach">🏖️ Pantai Tropis Siang</option>
+                  <option value="cyber_desert">🏜️ Gurun Senja Horizon</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row-2col">
+              <div class="form-group">
+                <label for="input-streamer-brand">Nama Channel di Billboard 3D</label>
+                <input
+                  id="input-streamer-brand"
+                  type="text"
+                  value="STREAMKART 3D LIVE"
+                  maxlength="22"
+                />
+              </div>
+              <div class="form-group">
+                <label for="select-rubberband">Rubber-Banding (Kejaran)</label>
+                <select id="select-rubberband">
+                  <option value="low" selected>Seimbang (Low)</option>
+                  <option value="medium">Kompetitif (Medium)</option>
+                  <option value="off">Murni Tanpa Bantuan (Off)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- PARTICIPANT / VOTING OPTIONS EDITOR -->
+          <div class="panel-card">
+            <div class="card-header-row">
+              <h3 id="participants-card-title">🏎️ Daftar Opsi Voting (Maks 12)</h3>
+              <button id="btn-preset-reset" class="mini-action-btn" title="Isi Ulang Contoh Default Sesuai Mode">
+                ↺ Isi Contoh
+              </button>
+            </div>
+
+            <div id="participants-editor-list" class="participants-list"></div>
+
+            <div class="add-participant-row">
+              <input
+                id="input-new-participant"
+                type="text"
+                placeholder="Nama opsi / peserta baru..."
+              />
+              <button id="btn-add-participant" class="mini-action-btn">+ Tambah</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 3: 13 SKILLS & TIER CONFIGURATION -->
+        <section id="tab-tiers" class="tab-panel">
+          <div class="panel-card">
+            <div class="card-header-row">
+              <h3>💎 Katalog 13 Skill & Tier Donasi</h3>
+              <div class="preset-group">
+                <button id="btn-save-tiers" class="mini-action-btn">💾 Simpan</button>
+                <button id="btn-reset-tiers" class="mini-action-btn">↺ Reset</button>
+              </div>
+            </div>
+            <p class="card-subtext">
+              Sesuaikan minimal nominal Rp untuk setiap skill atau gunakan kata kunci
+              <code>!skill</code> pada pesan donasi.
+            </p>
+            <div id="tier-editor-list" class="tier-list"></div>
+          </div>
+        </section>
+
+        <!-- TAB 4: MULTI-TENANT WEBHOOK & REALTIME RELAY -->
+        <section id="tab-webhook" class="tab-panel">
+          <div class="panel-card">
+            <div class="card-header-row">
+              <h3>🔗 Multi-Tenant Room & Webhook</h3>
+              <span id="webhook-status-badge" class="shortcut-pill">🟡 Menghubungkan...</span>
+            </div>
+
+            <div class="form-row-2col">
+              <div class="form-group">
+                <label for="input-room-slug">Nama / Slug Streamer</label>
+                <input id="input-room-slug" type="text" value="indra99" maxlength="16" />
+              </div>
+              <div class="form-group">
+                <label for="select-webhook-provider">Platform Donasi</label>
+                <select id="select-webhook-provider">
+                  <option value="tako" selected>Tako (X-Tako-Signature)</option>
+                  <option value="saweria">Saweria</option>
+                  <option value="bagibagi">Bagi-Bagi</option>
+                  <option value="sociabuzz">Sociabuzz</option>
+                  <option value="generic">Generic JSON</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Room ID Aktif (Terisolasi per Streamer)</label>
+              <div class="paste-row">
+                <input id="input-room-id-readonly" type="text" readonly value="room_..." />
+                <button id="btn-regen-room" type="button" class="mini-action-btn" title="Buat Room ID & Secret Token Baru">
+                  🔄 Room Baru
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>1. Webhook URL (Tempel di Kolom URL Dashboard Tako/Saweria)</label>
+              <div class="paste-row">
+                <input
+                  id="input-webhook-url"
+                  type="password"
+                  readonly
+                  value="https://..."
+                />
+                <button id="btn-toggle-webhook-vis" type="button" class="icon-btn" title="Tampilkan / Sembunyikan URL">
+                  👁️
+                </button>
+                <button id="btn-copy-webhook-url" type="button" class="mini-action-btn">
+                  📋 Salin
+                </button>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="input-webhook-token">
+                2. Webhook Token (Validasi Header <code>X-Tako-Signature</code> HMAC SHA-256)
+              </label>
+              <div class="paste-row">
+                <input
+                  id="input-webhook-token"
+                  type="password"
+                  placeholder="Tempel token dari Tako atau klik Buat Baru..."
+                  value=""
+                />
+                <button
+                  id="btn-toggle-token-vis"
+                  type="button"
+                  class="icon-btn"
+                  title="Tampilkan / Sembunyikan Webhook Token"
+                >
+                  👁️
+                </button>
+                <button
+                  id="btn-copy-webhook-token"
+                  type="button"
+                  class="mini-action-btn"
+                  title="Salin Token untuk Ditempel ke Kolom Webhook Token di Tako"
+                >
+                  📋 Salin
+                </button>
+                <button
+                  id="btn-gen-webhook-token"
+                  type="button"
+                  class="mini-action-btn"
+                  title="Buat Webhook Token Baru"
+                >
+                  Buat Baru
+                </button>
+              </div>
+              <label
+                style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px;color:#cbd5e1;cursor:pointer"
+              >
+                <input id="chk-require-signature" type="checkbox" style="width:auto" />
+                <span>Wajibkan header <code>X-Tako-Signature</code> (Tolak jika token kosong)</span>
+              </label>
+              <span style="font-size:10px;color:#94a3b8;line-height:1.4">
+                💡 <strong>Cara Pakai di Tako:</strong> Klik <strong>Buat Baru</strong> di Tako lalu tempel tokennya ke kolom di atas (atau salin token di atas ke Tako), kemudian salin <strong>Webhook URL</strong> ke Tako & klik <em>Tes Notifikasi</em>.
+              </span>
+            </div>
+          </div>
+
+          <!-- TEST LIVE WEBHOOK ROUND-TRIP -->
+          <div class="panel-card">
+            <h3>🧪 Tes Notifikasi Webhook (Simulasi <code>X-Tako-Signature</code>)</h3>
+            <p style="font-size:11px;color:#94a3b8">
+              Mengirim HTTP POST ke <code>/api/webhook</code> lengkap dengan header <code>X-Tako-Signature</code> (<code>HMAC SHA-256</code> dari <code>JSON.stringify(body)</code> + <code>webhookToken</code>) dan memvalidasinya dengan <code>crypto.timingSafeEqual</code>.
+            </p>
+            <div class="form-row-2col">
+              <div class="form-group">
+                <label for="input-wh-test-name">Nama Pengirim</label>
+                <input id="input-wh-test-name" type="text" value="Sultan_Saweria" />
+              </div>
+              <div class="form-group">
+                <label for="input-wh-test-amount">Nominal (Rp)</label>
+                <input id="input-wh-test-amount" type="number" step="5000" value="50000" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="input-wh-test-msg">Pesan Payload</label>
+              <input id="input-wh-test-msg" type="text" value="#1 !misil tes webhook masuk!" />
+            </div>
+            <button id="btn-send-test-webhook" type="button" class="submit-donation-btn">
+              🚀 TES KIRIM WEBHOOK KE /api/webhook
+            </button>
+          </div>
+
+          <!-- OPTIONAL PUSHER CLOUD CONFIG -->
+          <div class="panel-card">
+            <h3>☁️ Konfigurasi Pusher Channels (Opsional untuk Cloud)</h3>
+            <div class="form-row-2col">
+              <div class="form-group">
+                <label for="input-pusher-key">Pusher App Key</label>
+                <input id="input-pusher-key" type="text" placeholder="Kosong = Mode Lokal SSE" />
+              </div>
+              <div class="form-group">
+                <label for="input-pusher-cluster">Cluster</label>
+                <input id="input-pusher-cluster" type="text" value="ap1" />
+              </div>
+            </div>
+            <button id="btn-save-pusher" type="button" class="mini-action-btn">
+              🔌 Simpan & Hubungkan Ulang
+            </button>
+          </div>
+
+          <!-- INCOMING WEBHOOK LOGS -->
+          <div class="panel-card">
+            <h3>📡 Log Trafik Webhook Masuk</h3>
+            <div id="webhook-logs-list" class="history-list">
+              <div style="font-size:11px;color:#64748b;text-align:center;padding:8px">
+                Menunggu paket webhook...
+              </div>
+            </div>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
